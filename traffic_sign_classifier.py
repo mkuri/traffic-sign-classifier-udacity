@@ -45,7 +45,7 @@ def preprocess(imgs):
         return np.transpose(img, (2, 0, 1))
 
     def _pipeline(img):
-        img = normalize_luminance_srgb(img)
+        # img = normalize_luminance_srgb(img)
         img = _grayscale(img)
         img = _normalize(img)
         img = _reshape(img)
@@ -62,13 +62,40 @@ def preprocess(imgs):
     return preprocessed
 
 
+def preprocess_inv(features):
+    print('>>> Inverse ...')
+    invs = []
+
+    def _reshape_inv(feature):
+        feature = np.transpose(feature, (1, 2, 0))
+        return feature.reshape(32, 32)
+
+    def _normalize_inv(feature):
+        return (feature*255).astype(np.uint8)
+
+    def _pipeline_inv(feature):
+        feature = _reshape_inv(feature)
+        feature = _normalize_inv(feature)
+        return feature
+
+    for feature in features:
+        inv = _pipeline_inv(feature)
+        invs.append(inv)
+
+    invs = np.array(invs)
+    print(type(invs))
+    print(invs.shape)
+
+    return invs
+
+
 def train_model(model, train):
     print('>>> Train model ...')
     dataset = ImageDataset(train['features'], train['labels'])
     dataloader = DataLoader(dataset, batch_size=4,
                             shuffle=True, num_workers=2)
-    n_epoch = 1
-    lr = 0.01
+    n_epoch = 10
+    lr = 0.0005
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
@@ -85,11 +112,30 @@ def train_model(model, train):
             loss.backward()
             optimizer.step()
 
-            running_loss += loss.data[0]
+            running_loss += loss.item()
             if i % 2000 == 1999:
                 print('[%d, %5d] loss: %.3f' %
                         (epoch+1, i+1, running_loss/2000))
                 running_loss = 0.0
+
+    return model
+
+
+def test_model(model, test):
+    print('>>> Test model ...')
+    dataset = ImageDataset(test['features'], test['labels'])
+    dataloader = DataLoader(dataset, batch_size=4,
+                            shuffle=False, num_workers=2)
+    
+    correct = 0
+    total = 0
+    for i, (features, labels) in enumerate(dataloader):
+        outputs = model(features)
+        _, predicted = torch.max(outputs, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+
+    print('Accuracy: %d %%' % (100 * correct / total))
 
 
 def main():
@@ -97,18 +143,26 @@ def main():
     # explore_dataset.output_data_summery(train, valid, test)
     # explore_dataset.output_histogram(train, valid, test)
 
-    # vis_imgs.output_grid_imgs('./figures/explore_imgs.png',
+    train['features'] = preprocess(train['features'])
+    # output_grid_imgs('./outputs/grayscaled.png',
     #         5, 5, train['features'], train['labels'], sign_names)
-
-    # train['features'] = preprocess(train['features'])
     # with open('./data/train_preprocessed.p', 'wb') as f:
     #     pickle.dump(train, f)
 
-    with open('./data/train_preprocessed.p', 'rb') as f:
-        train = pickle.load(f)
-
+    # with open('./data/train_preprocessed.p', 'rb') as f:
+    #     train = pickle.load(f)
+    
     model = Lenet()
-    train_model(model, train)
+    model = train_model(model, train)
+    #
+    # torch.save(model.state_dict(), './outputs/lenet.p')
+
+    # model.load_state_dict(torch.load('./outputs/lenet.p'))
+
+    test['features'] = preprocess(test['features'])
+    
+    test_model(model, test)
+
 
 
 if __name__ == "__main__":
