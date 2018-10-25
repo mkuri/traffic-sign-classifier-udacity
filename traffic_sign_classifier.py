@@ -1,5 +1,6 @@
 import pickle
 import time
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -14,6 +15,7 @@ from preprocess.img.normalize import normalize_luminance_srgb
 from output_sign_imgs import output_grid_imgs, output_compared_imgs
 from models.lenet import Lenet
 from dataset import ImageDataset
+from visualize.img import combine_in_one_img
 
 
 def load_files():
@@ -45,7 +47,7 @@ def preprocess(imgs):
         return np.transpose(img, (2, 0, 1))
 
     def _pipeline(img):
-        # img = normalize_luminance_srgb(img)
+        img = normalize_luminance_srgb(img)
         img = _grayscale(img)
         img = _normalize(img)
         img = _reshape(img)
@@ -60,33 +62,6 @@ def preprocess(imgs):
     print(preprocessed.shape)
 
     return preprocessed
-
-
-def preprocess_inv(features):
-    print('>>> Inverse ...')
-    invs = []
-
-    def _reshape_inv(feature):
-        feature = np.transpose(feature, (1, 2, 0))
-        return feature.reshape(32, 32)
-
-    def _normalize_inv(feature):
-        return (feature*255).astype(np.uint8)
-
-    def _pipeline_inv(feature):
-        feature = _reshape_inv(feature)
-        feature = _normalize_inv(feature)
-        return feature
-
-    for feature in features:
-        inv = _pipeline_inv(feature)
-        invs.append(inv)
-
-    invs = np.array(invs)
-    print(type(invs))
-    print(invs.shape)
-
-    return invs
 
 
 def train_model(model, train):
@@ -123,6 +98,7 @@ def train_model(model, train):
 
 def test_model(model, test):
     print('>>> Test model ...')
+    model.eval()
     dataset = ImageDataset(test['features'], test['labels'])
     dataloader = DataLoader(dataset, batch_size=4,
                             shuffle=False, num_workers=2)
@@ -135,7 +111,57 @@ def test_model(model, test):
         total += labels.size(0)
         correct += (predicted == labels).sum().item()
 
-    print('Accuracy: %d %%' % (100 * correct / total))
+    accuracy = correct / total
+    print('Accuracy: %.3f' % accuracy)
+
+    return accuracy
+
+
+def test_web_imgs(model, features):
+    print('>>> Test web images ...')
+    dataset = ImageDataset(features, np.array([13, 22, 15, 4, 38]))
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=False, num_workers=1)
+    model.eval()
+
+    for i, (features, labels) in enumerate(dataloader):
+        outputs = model(features)
+        print('label', labels)
+        print('outputs', outputs)
+        _, predicted = torch.max(outputs, 1)
+        m = torch.nn.Softmax()
+        softmax = m(outputs)
+        print('softmax', softmax)
+        print('predicted', predicted)
+        sorts = []
+        for i, output in enumerate(softmax[0]):
+            sorts.append((output.item(), i))
+        sorts = sorted(sorts, key=lambda x: x[0], reverse=True)
+        print(sorts)
+        for i in range(5):
+            print('%.4f' % sorts[i][0])
+
+    
+        
+    
+
+
+def load_web_imgs(paths):
+    print('>>> Loading web images ...')
+    
+    imgs = []
+    for path in paths:
+        img = cv2.imread(str(path))
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        imgs.append(img)
+
+    imgs = np.array(imgs)
+    print(type(imgs))
+    print(imgs.shape)
+
+    fig = combine_in_one_img(imgs, ["", "", "", "", ""], [None, None, None, None, None], '15')
+    fig.savefig('./figures/web_images.png', dpi=300, transparent=True, bbox_inches='tight', pad_inches=0)
+    
+    return imgs
 
 
 def main():
@@ -143,7 +169,7 @@ def main():
     # explore_dataset.output_data_summery(train, valid, test)
     # explore_dataset.output_histogram(train, valid, test)
 
-    train['features'] = preprocess(train['features'])
+    # train['features'] = preprocess(train['features'])
     # output_grid_imgs('./outputs/grayscaled.png',
     #         5, 5, train['features'], train['labels'], sign_names)
     # with open('./data/train_preprocessed.p', 'wb') as f:
@@ -153,15 +179,23 @@ def main():
     #     train = pickle.load(f)
     
     model = Lenet()
-    model = train_model(model, train)
+    # model = train_model(model, train)
     #
     # torch.save(model.state_dict(), './outputs/lenet.p')
 
-    # model.load_state_dict(torch.load('./outputs/lenet.p'))
+    model.load_state_dict(torch.load('./outputs/lenet.p'))
 
-    test['features'] = preprocess(test['features'])
+    # test['features'] = preprocess(test['features'])
+    # valid['features'] = preprocess(valid['features'])
+
+    imgs = load_web_imgs(Path('./data/web').glob('*'))
+    features = preprocess(imgs)
+
+    test_web_imgs(model, features)
+
+
     
-    test_model(model, test)
+    # test_model(model, test)
 
 
 
